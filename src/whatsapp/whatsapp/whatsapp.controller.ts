@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Logger, Post, Query, Req } from '@nestjs/common';
 import { Request } from 'express';
 
 import * as process from 'node:process';
@@ -9,6 +9,8 @@ import { OpenaiService } from 'src/openai/openai.service';
 
 @Controller('whatsapp')
 export class WhatsappController {
+  private readonly logger = new Logger(WhatsappController.name);
+
   constructor(
     private readonly whatsAppService: WhatsappService,
     private readonly stabilityaiService: StabilityaiService,
@@ -17,28 +19,40 @@ export class WhatsappController {
   ) {}
 
   @Get('webhook')
-  whatsappVerificationChallenge(@Req() request: Request) {
-    const mode = request.query['hub.mode'];
-    const challenge = request.query['hub.challenge'];
-    const token = request.query['hub.verify_token'];
-
+  whatsappVerificationChallenge(
+    @Query('hub.mode') mode: string,
+    @Query('hub.challenge') challenge: string,
+    @Query('hub.verify_token') token: string,
+  ) {
+    this.logger.log(`Received verification request - Mode: ${mode}, Token: ${token}`);
+    
     const verificationToken =
       process.env.WHATSAPP_CLOUD_API_WEBHOOK_VERIFICATION_TOKEN;
 
     if (!mode || !token) {
-      return 'Error verifying token';
+      this.logger.error('Missing mode or token in verification request');
+      return 'Error: Missing Parameters';
     }
 
     if (mode === 'subscribe' && token === verificationToken) {
-      return challenge?.toString();
+      this.logger.log('Webhook verified successfully');
+      return challenge;
     }
+    
+    this.logger.error(`Webhook verification failed - Token mismatch or invalid mode`);
+    return 'Error: Token Mismatch';
   }
 
   @Post('webhook')
   @HttpCode(200)
   async handleIncomingWhatsappMessage(@Body() request: any) {
+    this.logger.log(`Received webhook request: ${JSON.stringify(request)}`);
+    
     const { messages } = request?.entry?.[0]?.changes?.[0].value ?? {};
-    if (!messages) return;
+    if (!messages) {
+      this.logger.log('No messages in the request');
+      return { status: 'success', message: 'No messages to process' };
+    }
 
     const message = messages[0];
     const messageSender = message.from;
@@ -62,7 +76,7 @@ export class WhatsappController {
               messageID,
             );
           }
-          return;
+          return { status: 'success', message: 'Image generation processed' };
         }
 
         await this.whatsAppService.sendWhatsAppMessage(
@@ -75,7 +89,7 @@ export class WhatsappController {
         const audioID = message.audio.id;
         const response = await this.whatsAppService.downloadMedia(audioID);
         if (response.status === 'error') {
-          return;
+          return { status: 'error', message: 'Failed to download audio' };
         }
 
         const transcribedSpeech = await this.audioService.convertAudioToText(
@@ -83,7 +97,7 @@ export class WhatsappController {
         );
 
         if (transcribedSpeech.status === 'error') {
-          return;
+          return { status: 'error', message: 'Failed to transcribe audio' };
         }
 
         const aiResponse = await this.openaiService.generateAIResponse(
@@ -95,7 +109,7 @@ export class WhatsappController {
           await this.audioService.convertTextToSpeech(aiResponse);
 
         if (textToSpeech.status === 'error') {
-          return;
+          return { status: 'error', message: 'Failed to convert text to speech' };
         }
 
         await this.whatsAppService.sendAudioByUrl(
@@ -104,6 +118,6 @@ export class WhatsappController {
         );
     }
 
-    return 'Message processed';
+    return { status: 'success', message: 'Message processed' };
   }
 }
