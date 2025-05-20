@@ -5,10 +5,14 @@ import { OpenaiService } from 'src/openai/openai.service';
 import axios, { AxiosRequestConfig } from 'axios';
 import * as path from 'path';
 import { writeFileSync, existsSync, mkdirSync } from 'fs';
+import { UserContextService } from 'src/user-context/user-context.service';
 
 @Injectable()
 export class WhatsappService {
-  constructor(private readonly openaiService: OpenaiService) {}
+  constructor(
+    private readonly openaiService: OpenaiService,
+    private readonly userContextService: UserContextService,
+  ) {}
 
   private readonly httpService = new HttpService();
   private readonly logger = new Logger(WhatsappService.name);
@@ -25,6 +29,15 @@ export class WhatsappService {
     userInput: string,
     messageID: string,
   ) {
+    // Check if this is a new conversation (no context exists)
+    const conversationHistory = await this.userContextService.getConversationHistory(messageSender);
+    
+    // If this is a new user or has no conversation history, send welcome message
+    if (conversationHistory.length === 0) {
+      await this.sendWelcomeMessage(messageSender, messageID);
+      return;
+    }
+
     const aiResponse = await this.openaiService.generateAIResponse(
       messageSender,
       userInput,
@@ -66,6 +79,149 @@ export class WhatsappService {
     } catch (error) {
       this.logger.error(error);
       return 'Axle broke!! Abort mission!!';
+    }
+  }
+
+  async sendWelcomeMessage(messageSender: string, messageID: string) {
+    try {
+      // First welcome message with initial buttons
+      const welcomeData = JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: messageSender,
+        context: {
+          message_id: messageID,
+        },
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: {
+            text: 'Hi! Welcome to Studio Libra 👋\nWhat would you like to explore?'
+          },
+          action: {
+            buttons: [
+              {
+                type: 'reply',
+                reply: {
+                  id: 'branding_service',
+                  title: 'Branding'
+                }
+              },
+              {
+                type: 'reply',
+                reply: {
+                  id: 'software_dev_service',
+                  title: 'Software Dev'
+                }
+              },
+              {
+                type: 'reply',
+                reply: {
+                  id: 'more_options',
+                  title: 'More Options'
+                }
+              }
+            ]
+          }
+        }
+      });
+      
+      const response = this.httpService
+        .post(this.url, welcomeData, this.config)
+        .pipe(
+          map((res) => {
+            return res.data;
+          }),
+        )
+        .pipe(
+          catchError((error) => {
+            this.logger.error(error);
+            throw new BadRequestException(
+              'Error Posting Welcome Message To WhatsApp Cloud API',
+            );
+          }),
+        );
+
+      const welcomeMessageStatus = await lastValueFrom(response);
+      this.logger.log('Welcome Message Sent. Status:', welcomeMessageStatus);
+      
+      // Save initial system context
+      await this.userContextService.saveToContext(
+        'User started conversation with Studio Libra',
+        'assistant',
+        messageSender
+      );
+      
+      return welcomeMessageStatus;
+    } catch (error) {
+      this.logger.error(error);
+      return 'Error sending welcome message';
+    }
+  }
+
+  async sendMoreOptionsMessage(messageSender: string) {
+    try {
+      const moreOptionsData = JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: messageSender,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: {
+            text: 'Here are more options:'
+          },
+          action: {
+            buttons: [
+              {
+                type: 'reply',
+                reply: {
+                  id: 'models_service',
+                  title: 'Models'
+                }
+              },
+              {
+                type: 'reply',
+                reply: {
+                  id: 'illustrations_comics',
+                  title: 'Illustrations & Comics'
+                }
+              },
+              {
+                type: 'reply',
+                reply: {
+                  id: 'talk_to_human',
+                  title: 'Talk to a human'
+                }
+              }
+            ]
+          }
+        }
+      });
+      
+      const response = this.httpService
+        .post(this.url, moreOptionsData, this.config)
+        .pipe(
+          map((res) => {
+            return res.data;
+          }),
+        )
+        .pipe(
+          catchError((error) => {
+            this.logger.error(error);
+            throw new BadRequestException(
+              'Error Posting More Options To WhatsApp Cloud API',
+            );
+          }),
+        );
+
+      const moreOptionsStatus = await lastValueFrom(response);
+      this.logger.log('More Options Message Sent. Status:', moreOptionsStatus);
+      
+      return moreOptionsStatus;
+    } catch (error) {
+      this.logger.error(error);
+      return 'Error sending more options message';
     }
   }
 
@@ -204,6 +360,7 @@ export class WhatsappService {
       return 'Axle broke!! Error Sending Audio!!';
     }
   }
+  
   async markMessageAsRead(messageID: string) {
     const data = JSON.stringify({
       messaging_product: 'whatsapp',
