@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OpenAI } from 'openai';
-import { UserContextService } from 'src/user-context/user-context.service';
+import { UserContextService } from '../user-context/user-context.service';
 
 @Injectable()
 export class OpenaiService {

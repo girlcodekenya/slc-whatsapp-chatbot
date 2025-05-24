@@ -3,10 +3,10 @@ import { map } from 'rxjs/operators';
 
 import * as process from 'node:process';
 import { WhatsappService } from './whatsapp.service';
-import { AudioService } from 'src/audio/audio.service';
-import { StabilityaiService } from 'src/stabilityai/stabilityai.service';
-import { OpenaiService } from 'src/openai/openai.service';
-import { UserContextService } from 'src/user-context/user-context.service';
+import { AudioService } from '../../audio/audio.service';
+import { StabilityaiService } from '../../stabilityai/stabilityai.service';
+import { OpenaiService } from '../../openai/openai.service';
+import { UserContextService } from '../../user-context/user-context.service';
 
 @Controller('whatsapp')
 export class WhatsappController {
